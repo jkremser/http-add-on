@@ -3,6 +3,7 @@ module github.com/kedacore/http-add-on
 go 1.22.2
 
 require (
+	github.com/envoyproxy/go-control-plane v0.12.0
 	github.com/go-logr/logr v1.4.2
 	github.com/google/go-cmp v0.6.0
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0
@@ -26,6 +27,11 @@ require (
 	sigs.k8s.io/controller-runtime v0.17.5
 	sigs.k8s.io/gateway-api v1.0.0
 	sigs.k8s.io/kustomize/kustomize/v5 v5.4.2
+)
+
+require (
+	github.com/cncf/xds/go v0.0.0-20240318125728-8a4994d93e50 // indirect
+	github.com/envoyproxy/protoc-gen-validate v1.0.4 // indirect
 )
 
 replace (

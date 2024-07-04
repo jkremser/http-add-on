@@ -21,6 +21,8 @@ type Serving struct {
 	// This is the server that the external scaler will issue metrics
 	// requests to
 	AdminPort int `envconfig:"KEDA_HTTP_ADMIN_PORT" required:"true"`
+	// EnvoyStatsMetricSinkPort is the port that the external envoy proxies can send metrics to.
+	EnvoyStatsMetricSinkPort int `envconfig:"KEDA_HTTP_ENVOY_STATS_METRIC_SINK_PORT" default:"9901"`
 	// ConfigMapCacheRsyncPeriod is the time interval
 	// for the configmap informer to rsync the local cache.
 	ConfigMapCacheRsyncPeriod time.Duration `envconfig:"KEDA_HTTP_SCALER_CONFIG_MAP_INFORMER_RSYNC_PERIOD" default:"60m"`

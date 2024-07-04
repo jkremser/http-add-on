@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/kedacore/http-add-on/interceptor/config"
+	"github.com/kedacore/http-add-on/interceptor/envoysink"
 	"github.com/kedacore/http-add-on/interceptor/handler"
 	"github.com/kedacore/http-add-on/interceptor/metrics"
 	"github.com/kedacore/http-add-on/interceptor/middleware"
@@ -70,6 +71,7 @@ func main() {
 
 	proxyPort := servingCfg.ProxyPort
 	adminPort := servingCfg.AdminPort
+	envoyMetricsPort := servingCfg.EnvoyStatsMetricSinkPort
 	proxyTLSEnabled := servingCfg.ProxyTLSEnabled
 
 	// setup the configured metrics collectors
@@ -101,6 +103,7 @@ func main() {
 	}
 
 	queues := queue.NewMemory()
+	externalQueues := queue.NewMemory()
 
 	sharedInformerFactory := informers.NewSharedInformerFactory(httpCl, servingCfg.ConfigMapCacheRsyncPeriod)
 	routingTable, err := routing.NewTable(sharedInformerFactory, servingCfg.WatchNamespace, queues)
@@ -143,8 +146,24 @@ func main() {
 	eg.Go(func() error {
 		setupLog.Info("starting the admin server", "port", adminPort)
 
-		if err := runAdminServer(ctx, ctrl.Log, queues, adminPort); !util.IsIgnoredErr(err) {
+		if err := runAdminServer(ctx, ctrl.Log, queues, externalQueues, adminPort); !util.IsIgnoredErr(err) {
 			setupLog.Error(err, "admin server failed")
+			return err
+		}
+
+		return nil
+	})
+
+	// setup the envoy metrics server for envoy metrics push
+	eg.Go(func() error {
+		setupLog.Info("starting the envoy metrics server", "port", envoyMetricsPort)
+		envoyMetricsServer, err := envoysink.NewMetricsServiceServer(ctrl.Log, externalQueues, sharedInformerFactory, servingCfg.WatchNamespace)
+		if err != nil {
+			setupLog.Error(err, "creating envoy metrics server")
+			return err
+		}
+		if err := envoyMetricsServer.Run(ctx, envoyMetricsPort); !util.IsIgnoredErr(err) {
+			setupLog.Error(err, "envoy metrics server failed")
 			return err
 		}
 
@@ -207,7 +226,7 @@ func main() {
 func runAdminServer(
 	ctx context.Context,
 	lggr logr.Logger,
-	q queue.Counter,
+	q, eq queue.Counter,
 	port int,
 ) error {
 	lggr = lggr.WithName("runAdminServer")
@@ -215,7 +234,7 @@ func runAdminServer(
 	queue.AddCountsRoute(
 		lggr,
 		adminServer,
-		q,
+		q, eq,
 	)
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)

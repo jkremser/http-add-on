@@ -63,6 +63,22 @@ func NewMemory() *Memory {
 	}
 }
 
+// SetRPS sets the RPS for the given host.
+func (r *Memory) SetRPS(host string, rps int) error {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+	r.rpsMap[host].Record(time.Now(), rps)
+	return nil
+}
+
+// SetConcurrency sets the concurrency for the given host.
+func (r *Memory) SetConcurrency(host string, concurrency int) error {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+	r.concurrentMap[host] = concurrency
+	return nil
+}
+
 // Increase changes the size of the queue adding delta
 func (r *Memory) Increase(host string, delta int) error {
 	r.mut.Lock()
