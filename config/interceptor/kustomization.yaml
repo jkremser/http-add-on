@@ -6,7 +6,7 @@ resources:
 - role_binding.yaml
 - admin.service.yaml
 - proxy.service.yaml
-- envoy_sink.service.yaml
+- kedify_proxy_sink.service.yaml
 - metrics.service.yaml
 - service_account.yaml
 - scaledobject.yaml
