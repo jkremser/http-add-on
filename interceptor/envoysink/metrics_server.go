@@ -30,6 +30,7 @@ import (
 const (
 	// envoyClusterNameAnnotation is the annotation key for the envoy cluster name.
 	envoyClusterNameAnnotation = "http.kedify.io/envoy-cluster-name"
+	externalProxyMetricKey     = "http.kedify.io/external-proxy-metric-key"
 
 	// envoy metrics representing RPS and pending requests.
 	envoyMetricRPS         = "cluster.upstream_rq_total"
@@ -171,7 +172,7 @@ func (s *metricsServiceServer) OnAdd(obj any, _ bool) {
 		return
 	}
 
-	clusterName := hso.Annotations[envoyClusterNameAnnotation]
+	clusterName := getClusterNameFromAnnotations(hso.Annotations)
 	if clusterName == "" {
 		s.log.V(4).Info("cluster name not found", "hso", hso)
 		return
@@ -191,16 +192,16 @@ func (s *metricsServiceServer) OnUpdate(o, n any) {
 		s.log.Info("not a HTTPScaledObject", "objNew", n, "type", fmt.Sprintf("%T", n))
 		return
 	}
-	if hsoNew.Annotations[envoyClusterNameAnnotation] == hsoOld.Annotations[envoyClusterNameAnnotation] {
+	if getClusterNameFromAnnotations(hsoNew.Annotations) == getClusterNameFromAnnotations(hsoOld.Annotations) {
 		s.log.V(4).Info("cluster name did not change", "hso", hsoNew)
 		return
 	}
 
-	oldClusterName := hsoOld.Annotations[envoyClusterNameAnnotation]
+	oldClusterName := getClusterNameFromAnnotations(hsoOld.Annotations)
 	if oldClusterName != "" {
 		s.deleteClusterNameFromMetrics(oldClusterName, hsoOld)
 	}
-	newClusterName := hsoNew.Annotations[envoyClusterNameAnnotation]
+	newClusterName := getClusterNameFromAnnotations(hsoNew.Annotations)
 	if newClusterName != "" {
 		s.addClusterNameToMetrics(newClusterName, hsoNew)
 	}
@@ -213,12 +214,20 @@ func (s *metricsServiceServer) OnDelete(obj any) {
 		s.log.Info("not a HTTPScaledObject", "obj", obj, "type", fmt.Sprintf("%T", obj))
 		return
 	}
-	clusterName := hso.Annotations[envoyClusterNameAnnotation]
+	clusterName := getClusterNameFromAnnotations(hso.Annotations)
 	if clusterName == "" {
 		s.log.V(4).Info("cluster name not found", "hso", hso)
 		return
 	}
 	s.deleteClusterNameFromMetrics(clusterName, hso)
+}
+
+// getClusterNameFromAnnotations gets the cluster name from the annotations.
+func getClusterNameFromAnnotations(annotations map[string]string) string {
+	if annotations[externalProxyMetricKey] != "" {
+		return annotations[externalProxyMetricKey]
+	}
+	return annotations[envoyClusterNameAnnotation]
 }
 
 // addCluserNameToMetrics adds the cluster name to the metrics.
