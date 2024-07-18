@@ -15,6 +15,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/kedacore/keda/v2/pkg/scalers/externalscaler"
 	"google.golang.org/protobuf/types/known/emptypb"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/ptr"
 
 	informershttpv1alpha1 "github.com/kedacore/http-add-on/operator/generated/informers/externalversions/http/v1alpha1"
@@ -85,6 +86,12 @@ func (e *impl) IsActive(
 	metricValue := metricValues[0].GetMetricValue()
 
 	active := metricValue > 0
+
+	if err := e.forwardIsActive(ctx, sor, active); err != nil {
+		lggr.Error(err, "IsActive forward to interceptors failed", "scaledObjectRef", sor.String())
+		return nil, err
+	}
+
 	res := &externalscaler.IsActiveResponse{
 		Result: active,
 	}
@@ -263,4 +270,22 @@ func (e *impl) interceptorMetrics(metricName string) (*externalscaler.GetMetrics
 		},
 	}
 	return res, nil
+}
+
+// forwardIsActive checks the min replicas on HSO and if desired, forwards the IsActive check from KEDA to interceptors to update their envoy xDS snapshot cache
+func (e *impl) forwardIsActive(ctx context.Context, sor *externalscaler.ScaledObjectRef, active bool) error {
+	httpso, err := e.httpsoInformer.Lister().HTTPScaledObjects(sor.Namespace).Get(sor.Name)
+	if kerrors.IsNotFound(err) {
+		e.lggr.V(4).Info("IsActive forward to interceptors skipped because HTTPScaledObject not found", "namespace", sor.Namespace, "name", sor.Name)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if httpso.Spec.Replicas != nil && httpso.Spec.Replicas.Min != nil && *httpso.Spec.Replicas.Min > 0 {
+		// if min replicas is set to larger than 0, interceptor doesn't need to worry about cold starts
+		e.lggr.V(4).Info("IsActive forward to interceptors skipped because min replicas is set", "namespace", sor.Namespace, "name", sor.Name, "value", *httpso.Spec.Replicas.Min)
+		return nil
+	}
+	return e.pinger.forwardIsActive(ctx, sor, active)
 }

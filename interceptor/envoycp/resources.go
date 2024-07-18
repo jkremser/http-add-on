@@ -296,11 +296,6 @@ func updateClusters(hsoKey string, cp Options, hso *httpaddonv1alpha1.HTTPScaled
 		}
 		return clusters, nil
 	}
-	for _, cluster := range clusters {
-		if cluster.Name == hsoKey {
-			return clusters, nil
-		}
-	}
 
 	address := fmt.Sprintf("%v.%v.svc.%v", hso.Spec.ScaleTargetRef.Service, hso.Namespace, cp.ClusterDomain)
 	lbEndpoint := getLoadBalancerEndpoint(address, hso.Spec.ScaleTargetRef.Port)
@@ -322,6 +317,13 @@ func updateClusters(hsoKey string, cp Options, hso *httpaddonv1alpha1.HTTPScaled
 			},
 		},
 	}
+	for i, cluster := range clusters {
+		if cluster.Name == hsoKey {
+			clusters[i] = cluster
+			return clusters, nil
+		}
+	}
+
 	clusters = append(clusters, cluster)
 	sort.Slice(clusters, func(i, j int) bool {
 		return clusters[i].Name < clusters[j].Name
@@ -336,6 +338,34 @@ func setClusters(resources map[resource.Type][]types.Resource, clusters []*clust
 		clusterResources[i] = c
 	}
 	resources[resource.ClusterType] = clusterResources
+}
+
+// setupColdStart configures a particular cluster for cold start. This is used when application is scaled to 0
+// and the first requests must go through the interceptor, envoy fleet must point the particular cluster there
+// instead of the application
+func setupColdStart(resources map[resource.Type][]types.Resource, cp Options, hso httpaddonv1alpha1.HTTPScaledObject) {
+	clusters := getClusters(resources, cp)
+	hsoKey := fmt.Sprintf("%s/%s", hso.Namespace, hso.Name)
+	for _, cluster := range clusters {
+		if cluster.Name == hsoKey {
+			configureClusterForColdStart(cluster, cp, hsoKey)
+			break
+		}
+	}
+	setClusters(resources, clusters)
+}
+
+// configureClusterForColdStart configures the cluster for cold start
+func configureClusterForColdStart(cluster *clusterv3.Cluster, cp Options, hsoKey string) {
+	lbEndpoint := getLoadBalancerEndpoint(cp.InterceptorHost, cp.InterceptorPort)
+	cluster.LoadAssignment = &endpointv3.ClusterLoadAssignment{
+		ClusterName: hsoKey,
+		Endpoints: []*endpointv3.LocalityLbEndpoints{
+			{
+				LbEndpoints: []*endpointv3.LbEndpoint{lbEndpoint},
+			},
+		},
+	}
 }
 
 // addResources adds the envoy resources to the snapshot cache based on the input values from the HTTPScaledObjects

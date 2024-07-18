@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/go-logr/logr"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	workqueue "k8s.io/client-go/util/workqueue"
 
@@ -30,6 +31,7 @@ import (
 	envoysink "github.com/kedacore/http-add-on/interceptor/envoysink"
 	httpaddonv1alpha1 "github.com/kedacore/http-add-on/operator/apis/http/v1alpha1"
 	clientset "github.com/kedacore/http-add-on/operator/generated/clientset/versioned"
+	"github.com/kedacore/http-add-on/pkg/k8s"
 )
 
 const (
@@ -42,6 +44,8 @@ type Options struct {
 	ClusterDomain     string
 	ControlPlaneHost  string
 	ControlPlanePort  uint32
+	InterceptorHost   string
+	InterceptorPort   uint32
 	ConnectionTimeout time.Duration
 }
 
@@ -49,6 +53,7 @@ type Options struct {
 type Server interface {
 	Run(ctx context.Context) error
 	HandleHSO(ctx context.Context, hso *httpaddonv1alpha1.HTTPScaledObject)
+	OnActivationCheck(ctx context.Context, namespace, name string, active bool) error
 }
 
 // server is the implementation of the Server interface
@@ -57,11 +62,12 @@ type server struct {
 	cache     cachev3.SnapshotCache
 	queue     workqueue.RateLimitingInterface
 	k8sClient clientset.Interface
+	epCache   k8s.EndpointsCache
 	cp        Options
 }
 
 // NewServer creates a new instance of the Server interface
-func NewServer(l logr.Logger, k8sClient clientset.Interface, cp Options) Server {
+func NewServer(l logr.Logger, k8sClient clientset.Interface, epCache k8s.EndpointsCache, cp Options) Server {
 	logAdapter := log.LoggerFuncs{
 		WarnFunc:  func(f string, args ...any) { l.Info(fmt.Sprintf("[WARN]  "+f, args...)) },
 		ErrorFunc: func(f string, args ...any) { l.Info(fmt.Sprintf("[ERROR] "+f, args...)) },
@@ -78,6 +84,7 @@ func NewServer(l logr.Logger, k8sClient clientset.Interface, cp Options) Server 
 		logger:    l,
 		queue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "envoy-control-plane"),
 		k8sClient: k8sClient,
+		epCache:   epCache,
 	}
 }
 
@@ -120,7 +127,32 @@ func (s *server) Run(ctx context.Context) error {
 
 // HandleHSO adds the HTTPScaledObject to the workqueue for further processing and forming envoy snapshot cache
 func (s *server) HandleHSO(ctx context.Context, hso *httpaddonv1alpha1.HTTPScaledObject) {
+	s.logger.V(4).Info("adding HSO to workqueue", "namespace", hso.Namespace, "name", hso.Name)
 	s.queue.Add(hso)
+}
+
+// OnActivationCheck is called when the interceptor has checked the application's activation status before it
+// sends the result back to KEDA, each interceptor should adjust the envoy fleet routing to interceptor if the
+// application is getting deactivated
+func (s *server) OnActivationCheck(ctx context.Context, namespace, name string, active bool) error {
+	s.logger.V(4).Info("handling activation check", "namespace", namespace, "name", name, "active", active)
+	cacheSnap, err := s.cache.GetSnapshot(NodeID)
+	if err != nil { // only returned when there is no snapshot
+		return nil
+	}
+	snap, ok := cacheSnap.(*cachev3.Snapshot)
+	if !ok {
+		return fmt.Errorf("failed to cast snapshot to cachev3.Snapshot")
+	}
+	hso, err := s.k8sClient.HttpV1alpha1().HTTPScaledObjects(namespace).Get(ctx, name, metav1.GetOptions{})
+	if kerrors.IsNotFound(err) {
+		s.logger.V(4).Info("HSO not found, skipping activation", "namespace", namespace, "name", name)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get HTTPScaledObject: %w", err)
+	}
+	return s.updateSnapshot(snap, hso, active)
 }
 
 // handleHSO updates the envoy fleet configuration in snapshot cache and sets the metric aggregation
@@ -139,7 +171,11 @@ func (s *server) handleHSO(ctx context.Context, hso *httpaddonv1alpha1.HTTPScale
 	if !ok {
 		return fmt.Errorf("failed to cast snapshot to cachev3.Snapshot")
 	}
-	if err := s.updateSnapshot(snap, hso); err != nil {
+	active, err := s.isActive(ctx, *hso)
+	if err != nil {
+		return fmt.Errorf("failed to check if HTTPScaledObject is active: %w", err)
+	}
+	if err := s.updateSnapshot(snap, hso, active); err != nil {
 		return fmt.Errorf("failed to update snapshot: %w", err)
 	}
 	return nil
@@ -171,13 +207,16 @@ func (s *server) runWorkqueue(ctx context.Context) {
 }
 
 // updateSnapshot updates the snapshot with the new HTTPScaledObject
-func (s *server) updateSnapshot(snap *cachev3.Snapshot, hso *httpaddonv1alpha1.HTTPScaledObject) error {
+func (s *server) updateSnapshot(snap *cachev3.Snapshot, hso *httpaddonv1alpha1.HTTPScaledObject, active bool) error {
 	resources := make(map[resource.Type][]types.Resource)
 	resources[resource.ListenerType] = maps.Values(snap.GetResources(resource.ListenerType))
 	resources[resource.ClusterType] = maps.Values(snap.GetResources(resource.ClusterType))
 
 	if err := addResources(resources, s.cp, *hso); err != nil {
 		return fmt.Errorf("failed to add resources: %w", err)
+	}
+	if !active {
+		setupColdStart(resources, s.cp, *hso)
 	}
 	version := getResourcesVersion(resources)
 	newSnap, err := cachev3.NewSnapshot(version, resources)
@@ -207,6 +246,16 @@ func (s *server) initNewSnapshot(ctx context.Context) error {
 		return fmt.Errorf("failed to add resources: %w", err)
 	}
 
+	for _, hso := range hsoList.Items {
+		active, err := s.isActive(ctx, hso)
+		if err != nil {
+			s.logger.Error(err, "failed to check if HTTPScaledObject is active", "namespace", hso.Namespace, "name", hso.Name)
+		}
+		if !active {
+			setupColdStart(resources, s.cp, hso)
+		}
+	}
+
 	version := getResourcesVersion(resources)
 	snap, err := cachev3.NewSnapshot(version, resources)
 	if err != nil {
@@ -218,4 +267,16 @@ func (s *server) initNewSnapshot(ctx context.Context) error {
 		return fmt.Errorf("failed to set snapshot: %w", err)
 	}
 	return nil
+}
+
+// isActive checks if the HTTPScaledObject is active from the endpoints cache
+func (s *server) isActive(ctx context.Context, hso httpaddonv1alpha1.HTTPScaledObject) (bool, error) {
+	endpoints, err := s.epCache.Get(hso.Namespace, hso.Spec.ScaleTargetRef.Service)
+	if kerrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to get endpoints: %w", err)
+	}
+	return len(endpoints.Subsets) > 0, nil
 }

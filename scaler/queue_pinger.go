@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kedacore/http-add-on/pkg/k8s"
 	"github.com/kedacore/http-add-on/pkg/queue"
+	"github.com/kedacore/keda/v2/pkg/scalers/externalscaler"
 )
 
 type PingerStatus int32
@@ -256,4 +258,33 @@ func fetchCounts(
 	}
 
 	return totalCounts, nil
+}
+
+// forwardIsActive forwards the active status to the interceptors so that they can update their envoy xDS snapshot cache
+// in case of scale to 0, the envoys should redirect traffic to the interceptor service for application cold start
+func (q *queuePinger) forwardIsActive(ctx context.Context, sor *externalscaler.ScaledObjectRef, active bool) error {
+	endpointURLs, err := k8s.EndpointsForService(ctx, q.interceptorNS, q.interceptorSvcName, q.adminPort, q.getEndpointsFn)
+	if err != nil {
+		return err
+	}
+	if len(endpointURLs) == 0 {
+		return fmt.Errorf("there isn't any valid interceptor endpoint")
+	}
+	responsesCh := make(chan error, len(endpointURLs))
+	for _, endpoint := range endpointURLs {
+		go func(e url.URL) {
+			responsesCh <- queue.ForwardIsActive(http.DefaultClient, e, sor, active)
+		}(*endpoint)
+	}
+	for range endpointURLs {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context marked done. stopping forwardIsActive loop: %w", ctx.Err())
+		case err := <-responsesCh:
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

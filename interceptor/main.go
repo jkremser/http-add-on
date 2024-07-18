@@ -108,11 +108,13 @@ func main() {
 	externalQueues := queue.NewMemory()
 
 	sharedInformerFactory := informers.NewSharedInformerFactory(httpCl, servingCfg.ConfigMapCacheRsyncPeriod)
-	envoycp := envoycp.NewServer(ctrl.Log.WithName("envoy-control-plane"), httpCl, envoycp.Options{
+	envoycp := envoycp.NewServer(ctrl.Log.WithName("envoy-control-plane"), httpCl, endpointsCache, envoycp.Options{
 		ClusterDomain:     servingCfg.ClusterDomain,
 		ConnectionTimeout: timeoutCfg.Connect,
 		ControlPlaneHost:  fmt.Sprintf("%s.%s.svc.%s", servingCfg.EnvoyControlPlaneServiceName, servingCfg.CurrentNamespace, servingCfg.ClusterDomain),
 		ControlPlanePort:  uint32(envoyControlPlanePort),
+		InterceptorHost:   fmt.Sprintf("%s.%s.svc.%s", servingCfg.ProxyHost, servingCfg.CurrentNamespace, servingCfg.ClusterDomain),
+		InterceptorPort:   uint32(proxyPort),
 	})
 	routingTable, err := routing.NewTable(sharedInformerFactory, servingCfg.WatchNamespace, queues, envoycp)
 	if err != nil {
@@ -154,7 +156,7 @@ func main() {
 	eg.Go(func() error {
 		setupLog.Info("starting the admin server", "port", adminPort)
 
-		if err := runAdminServer(ctx, ctrl.Log, queues, externalQueues, adminPort); !util.IsIgnoredErr(err) {
+		if err := runAdminServer(ctx, ctrl.Log, queues, externalQueues, envoycp, adminPort); !util.IsIgnoredErr(err) {
 			setupLog.Error(err, "admin server failed")
 			return err
 		}
@@ -245,6 +247,7 @@ func runAdminServer(
 	ctx context.Context,
 	lggr logr.Logger,
 	q, eq queue.Counter,
+	envoycp envoycp.Server,
 	port int,
 ) error {
 	lggr = lggr.WithName("runAdminServer")
@@ -253,6 +256,11 @@ func runAdminServer(
 		lggr,
 		adminServer,
 		q, eq,
+	)
+	queue.AddActivationRoute(
+		lggr,
+		adminServer,
+		envoycp,
 	)
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
