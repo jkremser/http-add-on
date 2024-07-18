@@ -1,0 +1,33 @@
+name: 'Upstream Sync'
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstreamBranch:
+        description: 'Upstream branch to sync with'
+        required: true
+        default: 'release/v2.9'
+jobs:
+  sync_latest_from_upstream:
+    runs-on: ubuntu-latest
+    name: Sync latest commits from upstream repo
+    steps:
+    - name: Authenticate CI app
+      id: generate_token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ secrets.CI_BOT_ID }}
+        private-key: ${{ secrets.CI_BOT_PRIVATE_KEY }}
+    - name: Sync keda-upstream-main with upstream/main
+      env:
+        UPSTREAM_BRANCH: ${{ inputs.upstreamBranch }}
+        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: |
+        set -euo pipefail
+        git init
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "CI system"
+        git remote add upstream https://github.com/kedacore/http-add-on.git
+        git remote add origin https://x-access-token:${GITHUB_TOKEN}@github.com/kedify/http-add-on.git
+        git pull upstream ${UPSTREAM_BRANCH}:${UPSTREAM_BRANCH}
+        git push origin ${UPSTREAM_BRANCH}
