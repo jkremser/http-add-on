@@ -64,7 +64,7 @@ func getRoutes(hsoKey string, hso *httpaddonv1alpha1.HTTPScaledObject) []*routev
 			Action: &routev3.Route_Route{
 				Route: &routev3.RouteAction{
 					ClusterSpecifier: &routev3.RouteAction_Cluster{
-						Cluster: hso.Name,
+						Cluster: hsoKey,
 					},
 				},
 			},
