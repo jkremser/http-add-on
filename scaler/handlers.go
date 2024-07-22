@@ -332,10 +332,13 @@ func (e *impl) checkAndForwardActivation(ctx context.Context, sor *externalscale
 	return e.pinger.forwardIsActive(ctx, sor, active)
 }
 
+// interceptorsHealthy returns true if 'keda-add-ons-http-interceptor-proxy' service has healthy endpoints and if
+// HTTPScaledObject is not marked with 'http.kedify.io/traffic-autowire=false' then also 'kedify-proxy' needs to have
+// at least one healthy endpoint address
 func (e *impl) interceptorsHealthy(ctx context.Context, hso *httpv1alpha1.HTTPScaledObject) bool {
 	lggr := e.lggr.WithName("checkInterceptors")
 	toCheck := [][]string{{e.pinger.interceptorServiceName + "-proxy", e.pinger.interceptorNS}}
-	if val, found := hso.GetObjectMeta().GetAnnotations()[kedifyAutowireAnnotation]; !found || val == "false" {
+	if val, found := hso.GetObjectMeta().GetAnnotations()[kedifyAutowireAnnotation]; !found || val != "false" {
 		toCheck = append(toCheck, []string{kedifyProxySvcName, hso.Namespace})
 	}
 	for _, svc := range toCheck {
