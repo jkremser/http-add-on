@@ -344,11 +344,11 @@ func (e *impl) interceptorsHealthy(ctx context.Context, hso *httpv1alpha1.HTTPSc
 	for _, svc := range toCheck {
 		endpoints, err := e.pinger.getEndpointsFn(ctx, svc[1], svc[0])
 		if err != nil {
-			lggr.Error(err, "can't get endpoints for %s/%s", svc[1], svc[0])
+			lggr.Error(err, fmt.Sprintf("can't get endpoints for %s/%s", svc[1], svc[0]))
 			return false
 		}
 		if len(endpoints.Subsets) == 0 || len(endpoints.Subsets[0].Addresses) == 0 {
-			lggr.V(1).Info("no endpoints for %s/%s", svc[1], svc[0])
+			lggr.V(2).Info(fmt.Sprintf("no endpoints for %s/%s", svc[1], svc[0]))
 			return false
 		}
 	}
