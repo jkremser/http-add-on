@@ -14,9 +14,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/kedacore/keda/v2/pkg/scalers/externalscaler"
-	"google.golang.org/protobuf/types/known/emptypb"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/ptr"
+
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	informershttpv1alpha1 "github.com/kedacore/http-add-on/operator/generated/informers/externalversions/http/v1alpha1"
 	"github.com/kedacore/http-add-on/pkg/k8s"
@@ -25,6 +26,7 @@ import (
 
 const (
 	keyInterceptorTargetPendingRequests = "interceptorTargetPendingRequests"
+	kedifyProxySvcName                  = "kedify-proxy"
 )
 
 var streamInterval time.Duration
@@ -197,7 +199,7 @@ func (e *impl) interceptorMetricSpec(metricName string, interceptorTargetPending
 }
 
 func (e *impl) GetMetrics(
-	_ context.Context,
+	ctx context.Context,
 	metricRequest *externalscaler.GetMetricsRequest,
 ) (*externalscaler.GetMetricsResponse, error) {
 	lggr := e.lggr.WithName("GetMetrics")
@@ -227,6 +229,16 @@ func (e *impl) GetMetrics(
 
 	key := namespacedName.String()
 	count := e.pinger.counts()[key]
+	if !e.interceptorsHealthy(ctx, sor.GetNamespace()) {
+		return &externalscaler.GetMetricsResponse{
+			MetricValues: []*externalscaler.MetricValue{
+				{
+					MetricName:  metricName,
+					MetricValue: int64(-1),
+				},
+			},
+		}, nil
+	}
 
 	var metricValue int
 	if httpso.Spec.ScalingMetric != nil &&
@@ -316,4 +328,20 @@ func (e *impl) checkAndForwardActivation(ctx context.Context, sor *externalscale
 		return nil
 	}
 	return e.pinger.forwardIsActive(ctx, sor, active)
+}
+
+func (e *impl) interceptorsHealthy(ctx context.Context, ns string) bool {
+	lggr := e.lggr.WithName("checkInterceptors")
+	for _, svc := range [][]string{{kedifyProxySvcName, ns}, {e.pinger.interceptorServiceName + "-proxy", e.pinger.interceptorNS}} {
+		endpoints, err := e.pinger.getEndpointsFn(ctx, svc[1], svc[0])
+		if err != nil {
+			lggr.Error(err, "can't get endpoints for %s/%s", svc[1], svc[0])
+			return false
+		}
+		if len(endpoints.Subsets) == 0 || len(endpoints.Subsets[0].Addresses) == 0 {
+			lggr.V(1).Info("no endpoints for %s/%s", svc[1], svc[0])
+			return false
+		}
+	}
+	return true
 }
