@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	httpv1alpha1 "github.com/kedacore/http-add-on/operator/apis/http/v1alpha1"
 	"github.com/kedacore/keda/v2/pkg/scalers/externalscaler"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/ptr"
@@ -27,6 +28,7 @@ import (
 const (
 	keyInterceptorTargetPendingRequests = "interceptorTargetPendingRequests"
 	kedifyProxySvcName                  = "kedify-proxy"
+	kedifyAutowireAnnotation            = "http.kedify.io/traffic-autowire"
 )
 
 var streamInterval time.Duration
@@ -229,7 +231,7 @@ func (e *impl) GetMetrics(
 
 	key := namespacedName.String()
 	count := e.pinger.counts()[key]
-	if !e.interceptorsHealthy(ctx, sor.GetNamespace()) {
+	if !e.interceptorsHealthy(ctx, httpso) {
 		return &externalscaler.GetMetricsResponse{
 			MetricValues: []*externalscaler.MetricValue{
 				{
@@ -330,9 +332,13 @@ func (e *impl) checkAndForwardActivation(ctx context.Context, sor *externalscale
 	return e.pinger.forwardIsActive(ctx, sor, active)
 }
 
-func (e *impl) interceptorsHealthy(ctx context.Context, ns string) bool {
+func (e *impl) interceptorsHealthy(ctx context.Context, hso *httpv1alpha1.HTTPScaledObject) bool {
 	lggr := e.lggr.WithName("checkInterceptors")
-	for _, svc := range [][]string{{kedifyProxySvcName, ns}, {e.pinger.interceptorServiceName + "-proxy", e.pinger.interceptorNS}} {
+	toCheck := [][]string{{e.pinger.interceptorServiceName + "-proxy", e.pinger.interceptorNS}}
+	if val, found := hso.GetObjectMeta().GetAnnotations()[kedifyAutowireAnnotation]; !found || val == "false" {
+		toCheck = append(toCheck, []string{kedifyProxySvcName, hso.Namespace})
+	}
+	for _, svc := range toCheck {
 		endpoints, err := e.pinger.getEndpointsFn(ctx, svc[1], svc[0])
 		if err != nil {
 			lggr.Error(err, "can't get endpoints for %s/%s", svc[1], svc[0])
