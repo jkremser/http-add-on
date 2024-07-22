@@ -274,6 +274,34 @@ func (e *impl) interceptorMetrics(metricName string) (*externalscaler.GetMetrics
 
 // forwardIsActive checks the min replicas on HSO and if desired, forwards the IsActive check from KEDA to interceptors to update their envoy xDS snapshot cache
 func (e *impl) forwardIsActive(ctx context.Context, sor *externalscaler.ScaledObjectRef, active bool) error {
+	sorKey := sor.Namespace + "/" + sor.Name
+	if active {
+		// forwarding activation is asynchronous to not slow down cold starts, it's fine if few more early requests
+		// are sent through the interceptor during activation as long as envoy later routes the heavy traffic directly
+		go func() {
+			// if this fails, it's ok because interceptors will eventually figure this out from target's endpoints
+			// so scaler only logs any errors during activation forwarding
+			err := e.checkAndForwardActivation(context.Background(), sor, active)
+			if err != nil {
+				e.lggr.Error(err, "IsActive forward to interceptors failed", "scaledObjectRef", sorKey, "active", active)
+				return
+			}
+		}()
+		return nil
+	} else {
+		// forwarding deactivation is synchronous and response to KEDA must wait before this completes because scale to 0
+		// and deactivation should not happen before envoy routes requests through the interceptor
+		err := e.checkAndForwardActivation(ctx, sor, active)
+		if err != nil {
+			e.lggr.Error(err, "IsActive forward to interceptors failed", "scaledObjectRef", sorKey, "active", active)
+			return err
+		}
+	}
+	return nil
+}
+
+// checkAndForwardActivation checks if IsActive value should be forwarded to interceptors based on existing HSO configuration
+func (e *impl) checkAndForwardActivation(ctx context.Context, sor *externalscaler.ScaledObjectRef, active bool) error {
 	httpso, err := e.httpsoInformer.Lister().HTTPScaledObjects(sor.Namespace).Get(sor.Name)
 	if kerrors.IsNotFound(err) {
 		e.lggr.V(4).Info("IsActive forward to interceptors skipped because HTTPScaledObject not found", "namespace", sor.Namespace, "name", sor.Name)

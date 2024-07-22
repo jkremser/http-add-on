@@ -263,7 +263,6 @@ func getClusters(resources map[resource.Type][]types.Resource, cp Options) []*cl
 				Type: clusterv3.Cluster_STRICT_DNS,
 			},
 			LbPolicy:                  clusterv3.Cluster_ROUND_ROBIN,
-			Http2ProtocolOptions:      &corev3.Http2ProtocolOptions{},
 			UpstreamConnectionOptions: &clusterv3.UpstreamConnectionOptions{},
 			LoadAssignment: &endpointv3.ClusterLoadAssignment{
 				ClusterName: "xds_cluster",
@@ -317,8 +316,8 @@ func updateClusters(hsoKey string, cp Options, hso *httpaddonv1alpha1.HTTPScaled
 			},
 		},
 	}
-	for i, cluster := range clusters {
-		if cluster.Name == hsoKey {
+	for i, c := range clusters {
+		if c.Name == hsoKey {
 			clusters[i] = cluster
 			return clusters, nil
 		}
