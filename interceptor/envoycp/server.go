@@ -152,7 +152,11 @@ func (s *server) OnActivationCheck(ctx context.Context, namespace, name string, 
 	if err != nil {
 		return fmt.Errorf("failed to get HTTPScaledObject: %w", err)
 	}
-	return s.updateSnapshot(snap, hso, active)
+	activeEndpoints, err := s.hasActiveEndpoints(ctx, *hso)
+	if err != nil {
+		return fmt.Errorf("failed to check if HTTPScaledObject Endpoints are active: %w", err)
+	}
+	return s.updateSnapshot(snap, hso, active && activeEndpoints)
 }
 
 // handleHSO updates the envoy fleet configuration in snapshot cache and sets the metric aggregation
@@ -171,7 +175,7 @@ func (s *server) handleHSO(ctx context.Context, hso *httpaddonv1alpha1.HTTPScale
 	if !ok {
 		return fmt.Errorf("failed to cast snapshot to cachev3.Snapshot")
 	}
-	active, err := s.isActive(ctx, *hso)
+	active, err := s.hasActiveEndpoints(ctx, *hso)
 	if err != nil {
 		return fmt.Errorf("failed to check if HTTPScaledObject is active: %w", err)
 	}
@@ -247,7 +251,7 @@ func (s *server) initNewSnapshot(ctx context.Context) error {
 	}
 
 	for _, hso := range hsoList.Items {
-		active, err := s.isActive(ctx, hso)
+		active, err := s.hasActiveEndpoints(ctx, hso)
 		if err != nil {
 			s.logger.Error(err, "failed to check if HTTPScaledObject is active", "namespace", hso.Namespace, "name", hso.Name)
 		}
@@ -269,8 +273,8 @@ func (s *server) initNewSnapshot(ctx context.Context) error {
 	return nil
 }
 
-// isActive checks if the HTTPScaledObject is active from the endpoints cache
-func (s *server) isActive(ctx context.Context, hso httpaddonv1alpha1.HTTPScaledObject) (bool, error) {
+// hasActiveEndpoints checks if the HTTPScaledObject is active from the endpoints cache
+func (s *server) hasActiveEndpoints(ctx context.Context, hso httpaddonv1alpha1.HTTPScaledObject) (bool, error) {
 	endpoints, err := s.epCache.Get(hso.Namespace, hso.Spec.ScaleTargetRef.Service)
 	if kerrors.IsNotFound(err) {
 		return false, nil
