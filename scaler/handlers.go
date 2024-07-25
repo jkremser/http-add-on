@@ -88,7 +88,6 @@ func (e *impl) IsActive(
 		return nil, err
 	}
 	metricValue := metricValues[0].GetMetricValue()
-
 	active := metricValue > 0
 
 	if err := e.forwardIsActive(ctx, sor, active); err != nil {
@@ -96,10 +95,16 @@ func (e *impl) IsActive(
 		return nil, err
 	}
 
-	res := &externalscaler.IsActiveResponse{
-		Result: active,
+	if sor.GetScalerMetadata()["trafficAutowire"] == "false" {
+		return &externalscaler.IsActiveResponse{Result: active}, nil
 	}
-	return res, nil
+	hso, err := e.httpsoInformer.Lister().HTTPScaledObjects(sor.Namespace).Get(sor.Name)
+	if err != nil {
+		lggr.Error(err, "unable to get HTTPScaledObject", "name", sor.Name, "namespace", sor.Namespace)
+		return &externalscaler.IsActiveResponse{Result: active}, nil
+	}
+
+	return &externalscaler.IsActiveResponse{Result: active || !e.interceptorsHealthy(ctx, hso)}, nil
 }
 
 func (e *impl) StreamIsActive(
