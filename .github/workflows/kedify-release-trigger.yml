@@ -9,77 +9,8 @@ on:
         default: 'v0.8.0'
 jobs:
   tag_kedify_release:
-    runs-on: ubuntu-latest
-    name: Sync latest commits from upstream repo and rebase kedify patches on the latest tag
-    steps:
-    - name: Authenticate CI app
-      id: generate_token
-      uses: actions/create-github-app-token@v1
-      with:
-        app-id: ${{ secrets.CI_BOT_ID }}
-        private-key: ${{ secrets.CI_BOT_PRIVATE_KEY }}
-
-    - name: Get repo from cache
-      id: repo-cache
-      uses: actions/cache@v4
-      with:
-        path: http-add-on
-        key: http-add-on-${{ hashFiles('.git/refs/remotes/kedacore/main') }}
-        restore-keys: |
-          http-add-on-${{ hashFiles('.git/refs/remotes/kedacore/main') }}
-          http-add-on-
-
-    - name: Set git global config
-      run: |
-        set -euo pipefail
-        git config --global user.email "github-actions@github.com"
-        git config --global user.name "CI system"
-
-    - name: Init repo for cache
-      if: steps.repo-cache.outputs.cache-hit != 'true'
-      env:
-        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
-      run: |
-        set -euo pipefail
-        mkdir -p http-add-on
-        cd http-add-on
-        git init
-        git remote add kedacore https://github.com/kedacore/http-add-on.git
-        git remote add kedify https://x-access-token:${GITHUB_TOKEN}@github.com/kedify/http-add-on.git
-        git fetch --all --tags
-
-    - name: Sync repo and tags kedacore/http-add-on -> kedify/http-add-on
-      env:
-        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
-      run: |
-        set -euo pipefail
-        cd http-add-on
-        git remote set-url kedify https://x-access-token:${GITHUB_TOKEN}@github.com/kedify/http-add-on.git
-        branches=( $(git ls-remote kedacore main 'release*' | awk '{print($2)}' | sed -e 's|refs/heads/||') )
-        for b in "${branches[@]}"; do
-          if ! git checkout "${b}"; then
-            git checkout --track kedacore/"${b}"
-          fi
-          git pull kedacore "${b}" --tags
-          git push kedify "${b}" --tags
-        done
-
-    - name: Tag kedify/http-add-on for build
-      env:
-        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
-        UPSTREAM_TAG: ${{ inputs.upstreamTag }}
-      run: |
-        set -euo pipefail
-        cd http-add-on
-        echo "rebase kedify patches on top of latest kedacode main"
-        git checkout kedify-main
-        git rebase main
-        echo "create kedify release branch starting from kedacore release tag"
-        git checkout "${UPSTREAM_TAG}"
-        git checkout -b "kedify-release-${UPSTREAM_TAG}"
-        echo "cherry-pick kedify changes to kedify release branch"
-        git cherry-pick main..kedify-main
-        git tag "${UPSTREAM_TAG}-0"
-        echo "push kedify-main, the release branch, and kedify release tag"
-        git push kedify kedify-main:kedify-main --force
-        git push kedify "kedify-release-${UPSTREAM_TAG}" --tags
+    secrets: inherit
+    uses: kedify/github-meta/.github/workflows/kedify-release-trigger.yml@main
+    with:
+      upstreamTag: ${{ inputs.upstreamTag }}
+      repoName: http-add-on

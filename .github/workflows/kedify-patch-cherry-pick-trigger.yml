@@ -1,0 +1,15 @@
+name: 'Kedify cherry-pick trigger'
+
+on:
+  workflow_dispatch:
+    inputs:
+      downstreamReleaseBranch:
+        description: 'Kedify http-add-on downstream release branch to sync cherry-picks from kedify-main'
+        required: true
+        default: 'kedify-release-v0.8.0'
+jobs:
+  tag_kedify_cherry_pick_release:
+    secrets: inherit
+    uses: kedify/github-meta/.github/workflows/kedify-patch-cherry-pick-trigger.yml@main
+    with:
+      downstreamReleaseBranch: ${{ inputs.downstreamReleaseBranch }}
