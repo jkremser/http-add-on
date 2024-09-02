@@ -6,7 +6,9 @@ on:
       downstreamReleaseBranch:
         description: 'Kedify http-add-on downstream release branch to sync cherry-picks from kedify-main'
         required: true
-        default: 'kedify-release-v0.8.0'
+        type: choice
+        options:
+          - kedify-release-v0.8.0
 jobs:
   tag_kedify_cherry_pick_release:
     secrets: inherit

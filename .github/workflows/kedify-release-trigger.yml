@@ -6,7 +6,9 @@ on:
       upstreamTag:
         description: 'Upstream KEDA HTTP Add-on tag to release Kedify HTTP Add-on images from'
         required: true
-        default: 'v0.8.0'
+        type: choice
+        options:
+          - 'v0.8.0'
 jobs:
   tag_kedify_release:
     secrets: inherit
