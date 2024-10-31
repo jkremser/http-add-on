@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - kedify-release-v0.8.0
+          - kedify-release-v0.8.1
 jobs:
   tag_kedify_cherry_pick_release:
     secrets: inherit
