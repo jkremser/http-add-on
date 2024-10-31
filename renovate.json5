@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base",
+  ],
+  "labels": ["renovate"],
+  "prConcurrentLimit": 5,
+  "baseBranches": ["kedify-main"],
+  // ignore everything except those that are white-listed
+  "packageRules": [
+    {
+      "packagePatterns": ["*"],
+      "enabled": false,
+    },
+    {
+      "packageNames": [
+        "kedify/agent",
+      ],
+      "enabled": true,
+    },
+  ],
+  "customManagers": [
+    {
+      // kedify-agent
+      "fileMatch": ["^tests/utils/setup_go$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "kedify/agent",
+      "matchStrings": [
+        "\\s*KedifyAgentImage = \"ghcr.io/(?<depName>[^:]+):(?<currentValue>[^\"]+)\"",
+      ],
+    },
+  ],
+  "reviewers": ["team:all"],
+  "prBodyNotes": [
+    "Bump some versions we have inside our code for e2e tests",
+  ],
+}
