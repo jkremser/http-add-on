@@ -17,12 +17,13 @@
         "kedify/agent",
       ],
       "enabled": true,
+      "matchFileNames": ["tests/utils/setup_test.go"],
     },
   ],
   "customManagers": [
     {
       // kedify-agent
-      "fileMatch": ["^tests/utils/setup_go$"],
+      "fileMatch": ["^tests/utils/setup_test.go$"],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "kedify/agent",
       "matchStrings": [
