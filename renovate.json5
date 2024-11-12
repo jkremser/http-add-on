@@ -6,6 +6,10 @@
   "labels": ["renovate"],
   "prConcurrentLimit": 5,
   "baseBranches": ["kedify-main"],
+  "reviewers": ["team:all"],
+  "prBodyNotes": [
+    "Bump some versions we have inside our code for e2e tests",
+  ],
   // ignore everything except those that are white-listed
   "packageRules": [
     {
@@ -14,25 +18,20 @@
     },
     {
       "packageNames": [
-        "kedify/agent",
+        "ghcr.io/kedify/agent", // docker img
       ],
       "enabled": true,
-      "matchFileNames": ["tests/utils/setup_test.go"],
     },
   ],
   "customManagers": [
     {
       // kedify-agent
       "fileMatch": ["^tests/utils/setup_test.go$"],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "kedify/agent",
+      "depNameTemplate": "ghcr.io/kedify/agent",
+      "datasourceTemplate": "docker",
       "matchStrings": [
-        "\\s*KedifyAgentImage = \"ghcr.io/(?<depName>[^:]+):(?<currentValue>[^\"]+)\"",
+        "KedifyAgentImage = \"ghcr.io/kedify/agent:(?<currentValue>[^\"]+)\"\n",
       ],
     },
-  ],
-  "reviewers": ["team:all"],
-  "prBodyNotes": [
-    "Bump some versions we have inside our code for e2e tests",
   ],
 }
